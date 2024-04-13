@@ -4,9 +4,7 @@
 // ATENTIE: va fi compilat asa: gcc -Wall -o prog prog.c -lssl -lcrypto
 //----------------------------------------------------------------------
 
-// TODO: Mutare fisierul snapshot in folderul care citim
 // TODO: Cerinta Lab7
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,11 +25,9 @@
 // Structura de date pentru nume si cheksum a unui fisier
 
 typedef struct{
-
     char numeFisier[PATH_MAX];
     unsigned char hash[SHA256_DIG_LENGTH];
     int isDir;
-
 } SnapshotEntry;
 
 // functia pentru deschidere folder
@@ -135,7 +131,7 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
 
         // ignoram directorul cel parinte
 
-        if(strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0){
+        if(strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strcmp(entry->d_name,"snapshot.dat") == 0){
             continue;
         }
 
@@ -196,9 +192,23 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
 
 // scriere snapshot in fisier
 
-int scrieSnapshot(const char *numeFisier, SnapshotEntry *snapshot, int count) {
+int scrieSnapshot(const char *numeFolder, const char *numeFisier, SnapshotEntry *snapshot, int count) {
 
-    int fd = open(numeFisier, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    DIR *folder;
+
+    // deschidem folderul
+
+    folder = deschideFolder(numeFolder);
+
+    // bagam in variabila cale calea folderul si numele de fisier
+    // pentru a construi nua cale relativa
+
+    char cale[PATH_MAX];
+    snprintf(cale,sizeof(cale),"%s/%s",numeFolder,numeFisier);
+
+    // cream sau deschidem fisierul snapshot si suprascriem datele
+
+    int fd = open(cale, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd == -1) {
         perror("EROARE: Deschidere fisier snapshot.\n");
         return 0;
@@ -211,43 +221,74 @@ int scrieSnapshot(const char *numeFisier, SnapshotEntry *snapshot, int count) {
     }
 
     close(fd);
+    inchideFolder(folder);
+
     return 1;
 }
 
 // citire a unui fisier sanpshot
 
-int citesteSnapshot(const char *numeFisier, SnapshotEntry *snapshot, int *count) {
-        
-    int fd = open(numeFisier, O_RDONLY);
-    if (fd == -1) {
-        perror("EROARE: Deschidere fisier snapshot.\n");
-        return 0;
+int citesteSnapshot(const char *numeFolder,const char *numeFisier, SnapshotEntry *snapshot, int *count) {
+
+    DIR *folder;
+
+    // deschidem folderul
+
+    folder = deschideFolder(numeFolder);
+
+    // structua pentru a citi un folder
+
+    struct dirent *entry;
+
+    // citim din folder fisierul snapshot
+
+    while ((entry = readdir(folder)) != NULL) {
+
+        if(strcmp(entry->d_name,numeFisier) == 0){
+
+            // bagam in variabila cale calea folderul si numele de fisier
+            // pentru a construi nua cale relativa
+
+            char cale[PATH_MAX];
+            snprintf(cale,sizeof(cale),"%s/%s",numeFolder,numeFisier);
+
+            int fd = open(cale, O_RDONLY);
+            if (fd == -1) {
+                perror("EROARE: Deschidere fisier snapshot.\n");
+                return 0;
+            }
+
+            // obtinem atributele unui fisier
+
+            struct stat statbuf;
+
+            if (fstat(fd, &statbuf) == -1) {
+                perror("Eroare: Obtinere atributele fisierului de snapshot");
+                close(fd);
+                return 0;
+            }
+
+            // cu marimea fisierului si a structuri snapshot, stim numarul de chekcsums din fisier
+
+            *count = statbuf.st_size / sizeof(SnapshotEntry);
+
+            // citim din fisierul de snapshot
+
+            if (read(fd, snapshot, statbuf.st_size) == -1) {
+                perror("EROARE: Citire din fisierul snapshot");
+                close(fd);
+                return 0;
+            }
+
+            inchidereFisier(fd);
+            return 1;
+
+        }
+
     }
 
-    // obtinem atributele unui fisier
-
-    struct stat statbuf;
-
-    if (fstat(fd, &statbuf) == -1) {
-        perror("Eroare: Obtinere atributele fisierului de snapshot");
-        close(fd);
-        return 0;
-    }
-
-    // cu marimea fisierului si a structuri snapshot, stim numarul de chekcsums din fisier
-
-    *count = statbuf.st_size / sizeof(SnapshotEntry);
-
-    // citim din fisierul de snapshot
-
-    if (read(fd, snapshot, statbuf.st_size) == -1) {
-        perror("EROARE: Citire din fisierul snapshot");
-        close(fd);
-        return 0;
-    }
-
-    inchidereFisier(fd);
-    return 1;
+    inchideFolder(folder);
+    return 0;
 }
 
 // compararea a doua snapshoturi
@@ -390,24 +431,22 @@ int main(int argc, char** argv){
 
     // verificam daca exista un fisier snapshot
     // daca exista apelam functia de comparare a snapshotului calculat cacum cu cel din fisier
-    // daca nu, vom printa ca este nuexista modificari
+    // daca nu, vom printa ca este nu exista modificari
 
     SnapshotEntry snapshot_anterior[MAX_FILES];
     int count_anterior = 0;
 
 
-    if (citesteSnapshot("snapshot.dat", snapshot_anterior, &count_anterior)) {
+    if (citesteSnapshot(argv[1],"snapshot.dat", snapshot_anterior, &count_anterior)) {
         // Facem comparatia intre snapshotul anterior si cel actual
         comparaSnapshoturi(snapshot, count, snapshot_anterior, count_anterior);
     } else{
         printf("Prima rulare, deci nu exista un snapshot anterior.\n");
     }
-       // printf("Prima rulare, deci nu exista un snapshot anterior.\n");
 
+    // scriem snapshotul actualizat intr-un fisier in directorul care il analizam
 
-    // scriem snapshotul actualizat intr-un fisier
-
-    if (!scrieSnapshot("snapshot.dat", snapshot, count)){
+    if (!scrieSnapshot(argv[1],"snapshot.dat", snapshot, count)){
         perror("EROARE: Creare fisier snapshot.\n");
         inchideFolder(folder);
         exit(EXIT);
