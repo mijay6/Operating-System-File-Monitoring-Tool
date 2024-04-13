@@ -1,5 +1,12 @@
 // Programul va primi un folder, va parcurge recursiv folderul, poate avea si subfoldere
 // Va trebui sa verfice ce s-a schimbat de la prima rulare a programului la a doua in folder orice, o linie de fisier, nume, etc.
+//----------------------------------------------------------------------
+// ATENTIE: va fi compilat asa: gcc -Wall -o prog prog.c -lssl -lcrypto
+//----------------------------------------------------------------------
+
+// TODO: Mutare fisierul snapshot in folderul care citim
+// TODO: Cerinta Lab7
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +17,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/sha.h>
+#include <linux/limits.h>
 
 #define EXIT -1
 #define MAX_FILES 1000
@@ -22,6 +30,7 @@ typedef struct{
 
     char numeFisier[PATH_MAX];
     unsigned char hash[SHA256_DIG_LENGTH];
+    int isDir;
 
 } SnapshotEntry;
 
@@ -74,7 +83,7 @@ int inchidereFisier(int fd){
     return -1;
 }
 
-// functie pentru a calcula suma de control SHA-256 a unui fisier
+// functie pentru a calcula suma de control SHA-256 a unui folder
 
 int calculeazaSHA256(const char *numeFisier, unsigned char *hash){
 
@@ -118,15 +127,13 @@ int calculeazaSHA256(const char *numeFisier, unsigned char *hash){
 
 void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, int *count){
 
-
     // structua pentru a citi un folder
 
     struct dirent *entry;
-    entry = readdir(folder);
 
     while ((entry = readdir(folder)) != NULL) {
 
-        // ignoram directorul curent si cel parinte
+        // ignoram directorul cel parinte
 
         if(strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0){
             continue;
@@ -138,6 +145,8 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
         char cale[PATH_MAX];
         snprintf(cale,sizeof(cale),"%s/%s",nume,entry->d_name);
 
+        // printf("Fisier: %s\n", cale);
+
         // aflam atributele fisierului, in acest caz ce tip de inregistrare e
 
         struct stat statbuf;
@@ -146,21 +155,31 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
             continue;
         }
         
-        // aplicam un macro care ne spnue din structura statbuf in variabila st_mode daca e director
+        // aplicam un macro care ne spune din structura statbuf in variabila st_mode daca e director
         // daca e director se aplica recursiv functia
         // daca nu e, se prelucreaza inregistrarea
 
         if(S_ISDIR(statbuf.st_mode)){
-           // printf("Director: %s\n", cale);
+        
             DIR *subfolder;
+            // trebue prelucrat folderul
+
+            //  printf("Director: %s \n", cale);
+
+            snapshot[*count].isDir = 1;
+            strcpy(snapshot[*count].numeFisier,cale);
+            (*count)++;
+
+            // si calculam suma de control al folderului
+
             subfolder = deschideFolder(cale);
-            parcurgereFolder(subfolder, cale, snapshot, count); // apelam recursiv pentru subdirector
+            parcurgereFolder(subfolder,cale, snapshot, count); // apelam recursiv pentru subdirector
             inchideFolder(subfolder);
         }else{
-           // printf("Fisier: %s\n", cale);
 
             // trebue prelucrat fisierul
 
+            snapshot[*count].isDir = 0;
             strcpy(snapshot[*count].numeFisier, cale);
 
             // calculamm suma de control SHA-256 a fisierului
@@ -215,7 +234,7 @@ int citesteSnapshot(const char *numeFisier, SnapshotEntry *snapshot, int *count)
         return 0;
     }
 
-    // cu marimea fisierului si a structuri snapshot, stim numarul de cheksums din fisier
+    // cu marimea fisierului si a structuri snapshot, stim numarul de chekcsums din fisier
 
     *count = statbuf.st_size / sizeof(SnapshotEntry);
 
@@ -233,40 +252,110 @@ int citesteSnapshot(const char *numeFisier, SnapshotEntry *snapshot, int *count)
 
 // compararea a doua snapshoturi
 
+// prin conventie, vom face ca snaphsot1 sa fie cel actual, si snapshot2 sa fie cel anterior
+
 void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *snapshot2, int count2) {
 
     int modificareFolder = 0;
+    
+
+    // parcurgem primul snapshot(cel actual) pentru ac gasi adaugarile
 
     for (int i = 0; i < count1; i++) {
         int gasit = 0;
+        int subfolderGasit = 0;
+
+     //   printf("Actual: %s, %d\n",snapshot1[i].numeFisier, snapshot1[i].isDir);
+
+        // cautam elementul din primul in al doilea
 
         for (int j = 0; j < count2; j++) {
 
-            // comparam numele fisererului
+        //    printf("Vechi:%s\n",snapshot2[j].numeFisier);
 
-            if (strcmp(snapshot1[i].numeFisier, snapshot2[j].numeFisier) == 0) {
-                gasit = 1;
-                if (memcmp(snapshot1[i].hash, snapshot2[j].hash, SHA256_DIGEST_LENGTH) != 0) {
-                    modificareFolder=1;
-                    printf("Fisierul %s a fost modificat.\n", snapshot1[i].numeFisier);
+            // verificam daca este folder si daca exista folderul
+
+            if((snapshot1[i].isDir == 1)){
+                if(strcmp(snapshot1[i].numeFisier, snapshot2[j].numeFisier) == 0){
+                    subfolderGasit = 1;
+                    break;
                 }
-                break;
             }
+            else{
 
+                // comparam numele fisererului
+
+                if (strcmp(snapshot1[i].numeFisier, snapshot2[j].numeFisier) == 0) {
+                    gasit = 1;
+                    if (memcmp(snapshot1[i].hash, snapshot2[j].hash, SHA256_DIGEST_LENGTH) != 0) {
+                        modificareFolder=1;
+                        printf("Fisierul %s a fost modificat.\n", snapshot1[i].numeFisier);
+                    }
+                    if (snapshot1[i].isDir != snapshot2[j].isDir) {
+                        modificareFolder=1;
+                        printf("FIsierul %s a fost modificat: tipul de fisier s-a schimbat.\n", snapshot1[i].numeFisier);
+                    } /*else if (snapshot1[i].isDir == 0 && memcmp(snapshot1[i].hash, snapshot2[j].hash, SHA256_DIGEST_LENGTH) != 0) {
+                        modificareFolder = 1;
+                        printf("Elementul %s a fost modificat: hash-ul s-a schimbat.\n", snapshot1[i].numeFisier);
+                    }*/
+                    break;
+                }  
+            }
         }
-        if (!gasit) {
+        if (!gasit && (snapshot1[i].isDir == 0)) {
             modificareFolder=1;
-            printf("Fișierul %s a fost șters sau adăugat.\n", snapshot1[i].numeFisier);
+            printf("Fisierul %s a fost adăugat.\n", snapshot1[i].numeFisier);
+        }
+        if((snapshot1[i].isDir == 1) && (subfolderGasit == 0)){
+            modificareFolder=1;
+            printf("Subdirectorul %s a fost adaugat\n",snapshot1[i].numeFisier);
+        }
+     //   printf("----------\n");
+    }
+
+    // Parcurgem al doilea snapshot (cel anterior) pentru a găsi elementele eliminate
+
+    for (int i = 0; i < count2; i++) {
+        
+        int gasit = 0;
+        int subfolderGasit = 0;
+
+        // Căutăm elementul din al doilea snapshot în primul snapshot
+        for (int j = 0; j < count1; j++) {
+
+             // verificam daca este folder si daca exista  exista folderul
+
+            if((snapshot2[i].isDir == 1)){
+                if(strcmp(snapshot2[i].numeFisier, snapshot1[j].numeFisier) == 0){
+                    subfolderGasit = 1;
+                    break;
+                }
+            }
+            else{
+                if (strcmp(snapshot2[i].numeFisier, snapshot1[j].numeFisier) == 0) {
+                    gasit = 1;
+                    break;     
+                }  
+            }   
+        }
+
+        // Dacă elementul din al doilea snapshot nu a fost găsit în primul snapshot, înseamnă că a fost sters
+
+        if (!gasit && (snapshot2[i].isDir == 0)) {
+            modificareFolder = 1;
+            printf("Fisierul %s a fost sters.\n", snapshot2[i].numeFisier);
+        } 
+        if((snapshot2[i].isDir == 1) && (subfolderGasit == 0)){
+            modificareFolder=1;
+            printf("Subdirectorul %s a fost sters\n",snapshot2[i].numeFisier);
         }
     }
 
-    if(!modificareFolder){
-        printf("Nu exista modificari in folder.\n");
+    if (!modificareFolder) {
+        printf("Nu există modificări în folder.\n");
     }
 
 }
-
-
 
 // se da ca parametru in linie de comanda folderul
 
@@ -323,8 +412,6 @@ int main(int argc, char** argv){
         inchideFolder(folder);
         exit(EXIT);
     }
-
-    //printf("%s %s", snapshot[1].numeFisier, ssnapshot[1].hash);
 
     return 0;
 }
