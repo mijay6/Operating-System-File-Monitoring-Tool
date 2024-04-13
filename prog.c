@@ -37,7 +37,7 @@ DIR *deschideFolder(const char *nume){
     DIR *folder;
 
     if ((folder = opendir(nume)) == NULL){
-        perror("EROARE: Deschidere fisier.\n");
+        perror("EROARE: Deschidere director.\n");
         exit(EXIT);
     }
     return folder;
@@ -48,7 +48,7 @@ DIR *deschideFolder(const char *nume){
 void inchideFolder(DIR *folder){
 
     if(closedir(folder) != 0){
-        perror("EROARE: Inchidere fisier.\n");
+        perror("EROARE: Inchidere director.\n");
         exit(EXIT);
     }
     
@@ -393,26 +393,22 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
     }
 
     if (!modificareFolder) {
-        printf("Nu există modificări în folder.\n");
+        printf("Nu există modificări.\n");
     }
 
 }
 
-// se da ca parametru in linie de comanda folderul
+// functie care analizeaza un folder intreg
 
-int main(int argc, char** argv){
+// TODO: Va trebui trata erorile pentru, nu poate sa se inchid programul doar pentru o eroare intru folder 
+// care a avut vreo eroare, ci va trebue sa sara la celelate foldere pentru analiza
 
-    // verificam ca numarul de argument dat ca parametru e corect
+void analizareFolder(const char *nume){
 
-    if(argc != 2){
-        perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
-        exit(EXIT);
-    }
-
-    // vom apela functia pentru a deschide folderul dat ca parametru
+     // vom apela functia pentru a deschide folderul dat ca parametru
 
     DIR *folder;
-    folder = deschideFolder(argv[1]);
+    folder = deschideFolder(nume);
 
     // initializam structura snapshot pentru toate fisierele unde vom stoca
     // numele fisierului si checksum
@@ -423,21 +419,20 @@ int main(int argc, char** argv){
     // parcurgem folferul si calculam cheksum pentru toate fisierele
     // si le punem in structura snapshot
 
-    parcurgereFolder(folder, argv[1], snapshot, &count);
+    parcurgereFolder(folder, nume, snapshot, &count);
 
     // vom apela functia pentru a inchide folderul
 
     inchideFolder(folder);
 
-    // verificam daca exista un fisier snapshot
+    // verificam daca exista un fisier snapshot in folderul principal
     // daca exista apelam functia de comparare a snapshotului calculat cacum cu cel din fisier
     // daca nu, vom printa ca este nu exista modificari
 
     SnapshotEntry snapshot_anterior[MAX_FILES];
     int count_anterior = 0;
 
-
-    if (citesteSnapshot(argv[1],"snapshot.dat", snapshot_anterior, &count_anterior)) {
+    if (citesteSnapshot(nume,"snapshot.dat", snapshot_anterior, &count_anterior)) {
         // Facem comparatia intre snapshotul anterior si cel actual
         comparaSnapshoturi(snapshot, count, snapshot_anterior, count_anterior);
     } else{
@@ -446,10 +441,47 @@ int main(int argc, char** argv){
 
     // scriem snapshotul actualizat intr-un fisier in directorul care il analizam
 
-    if (!scrieSnapshot(argv[1],"snapshot.dat", snapshot, count)){
+    if (!scrieSnapshot(nume,"snapshot.dat", snapshot, count)){
         perror("EROARE: Creare fisier snapshot.\n");
         inchideFolder(folder);
         exit(EXIT);
+    }
+
+}
+
+
+// se da ca parametru in linie de comanda folderele
+
+int main(int argc, char** argv){
+
+    // verificam ca numarul de argument dat ca parametru e corect
+
+    if(argc > 11){
+        perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
+        exit(EXIT);
+    }
+
+    // verificam ca argumetele date ca parametru sunt directoare
+
+    // TODO: mai trebue verificat ca parametri sunt diferiti
+
+    for(int i = 1; i < argc; i++){
+        DIR *dir = opendir(argv[i]);
+        if (dir) {
+            closedir(dir);
+        } else {
+            fprintf(stderr,"EROARE: %s nu este un folder sau nu poate fi deschis.\n", argv[i]);
+            closedir(dir);
+            exit(EXIT);
+        }
+    }
+
+    // apelam functia pentru a prelucra folderul in fiecare dat ca parametru
+
+    for(int j = 1; j < argc; j++){
+        printf("In folderul %s:\n", argv[j]);
+        analizareFolder(argv[j]);
+        printf("-----------------\n");
     }
 
     return 0;
