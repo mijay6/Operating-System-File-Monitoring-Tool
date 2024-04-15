@@ -4,7 +4,7 @@
 // ATENTIE: va fi compilat asa: gcc -Wall -o prog prog.c -lssl -lcrypto
 //----------------------------------------------------------------------
 
-// TODO: Cerinta Lab7
+// TODO: Cerinta Lab8
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +21,7 @@
 #define MAX_FILES 1000
 #define BUF_SIZE 4096
 #define SHA256_DIG_LENGTH 32
+#define FILE_NAME_LENGTH 50
 
 // Structura de date pentru nume si cheksum a unui fisier
 
@@ -129,9 +130,9 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
 
     while ((entry = readdir(folder)) != NULL) {
 
-        // ignoram directorul cel parinte
+        // ignoram directorul celfisierele care arat catre directorul parinte, cel curent, si cel snapshot
 
-        if(strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strcmp(entry->d_name,"snapshot.dat") == 0){
+        if(strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strstr(entry->d_name, "snapshot.dat") != NULL ){
             continue;
         }
 
@@ -141,13 +142,13 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
         char cale[PATH_MAX];
         snprintf(cale,sizeof(cale),"%s/%s",nume,entry->d_name);
 
-        // printf("Fisier: %s\n", cale);
+        //printf("Fisier: %s\n", cale);
 
         // aflam atributele fisierului, in acest caz ce tip de inregistrare e
 
         struct stat statbuf;
         if(lstat(cale,&statbuf) == -1){
-            fprintf(stderr,"EROARE: la citirea atributelor fisierului %s ", entry->d_name);
+            fprintf(stderr,"EROARE: la citirea atributelor fisierului %s\n", entry->d_name);
             continue;
         }
         
@@ -188,6 +189,15 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
             }
         }
     }
+}
+
+// printeaza SnapshotEntry
+
+void printSnapshotEntry(SnapshotEntry snapshot){
+
+    printf("Nume fisier: %s\n", snapshot.numeFisier);
+    printf("Hash: %s\n", snapshot.hash);
+
 }
 
 // scriere snapshot in fisier
@@ -298,7 +308,6 @@ int citesteSnapshot(const char *numeFolder,const char *numeFisier, SnapshotEntry
 void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *snapshot2, int count2) {
 
     int modificareFolder = 0;
-    
 
     // parcurgem primul snapshot(cel actual) pentru ac gasi adaugarile
 
@@ -312,8 +321,8 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
 
         for (int j = 0; j < count2; j++) {
 
-        //    printf("Vechi:%s\n",snapshot2[j].numeFisier);
-
+        // printf("Vechi:%s\n",snapshot2[j].numeFisier);
+    
             // verificam daca este folder si daca exista folderul
 
             if((snapshot1[i].isDir == 1)){
@@ -363,7 +372,7 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
 
         // Căutăm elementul din al doilea snapshot în primul snapshot
         for (int j = 0; j < count1; j++) {
-
+            
              // verificam daca este folder si daca exista  exista folderul
 
             if((snapshot2[i].isDir == 1)){
@@ -403,7 +412,7 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
 // TODO: Va trebui trata erorile pentru, nu poate sa se inchid programul doar pentru o eroare intru folder 
 // care a avut vreo eroare, ci va trebue sa sara la celelate foldere pentru analiza
 
-void analizareFolder(const char *nume){
+void analizareFolder(const char *nume, const char *output){
 
      // vom apela functia pentru a deschide folderul dat ca parametru
 
@@ -432,40 +441,87 @@ void analizareFolder(const char *nume){
     SnapshotEntry snapshot_anterior[MAX_FILES];
     int count_anterior = 0;
 
-    if (citesteSnapshot(nume,"snapshot.dat", snapshot_anterior, &count_anterior)) {
+    // cream numele fisierului de snapshot
+
+    char nume_fis[FILE_NAME_LENGTH];
+    snprintf(nume_fis,sizeof(nume_fis),"%s_%s",nume,"snapshot.dat");
+
+    // intrebare
+    // trebuie modificata citirea ca sa admita si sa citeasca din fisierul output ???
+
+    if (citesteSnapshot(nume,nume_fis, snapshot_anterior, &count_anterior)) {
         // Facem comparatia intre snapshotul anterior si cel actual
         comparaSnapshoturi(snapshot, count, snapshot_anterior, count_anterior);
     } else{
         printf("Prima rulare, deci nu exista un snapshot anterior.\n");
     }
 
-    // scriem snapshotul actualizat intr-un fisier in directorul care il analizam
+    // scriem snapshotul actualizat intr-un fisier in directorul care il analizam sau in
+    // directorul output specifica ca argument in linie de comanda
 
-    if (!scrieSnapshot(nume,"snapshot.dat", snapshot, count)){
-        perror("EROARE: Creare fisier snapshot.\n");
-        inchideFolder(folder);
-        exit(EXIT);
+    if(output == NULL){
+        if (!scrieSnapshot(nume,nume_fis, snapshot, count)){
+            perror("EROARE: Creare fisier snapshot.\n");
+            inchideFolder(folder);
+            exit(EXIT);
+        }
+    }else{
+        if (!scrieSnapshot(output,nume_fis, snapshot, count)){
+            perror("EROARE: Creare fisier snapshot.\n");
+            inchideFolder(folder);
+            exit(EXIT);
+        }
     }
-
 }
-
 
 // se da ca parametru in linie de comanda folderele
 
 int main(int argc, char** argv){
 
-    // verificam ca numarul de argument dat ca parametru e corect
+    // verificam daca se da un argument suplimentar -o in care indicam si un folder de iesire
+    // unde vor fi stocate toate snapshoturile din directoarele date ca parametru
 
-    if(argc > 11){
+    int i = 1; 
+    int j = 1;
+    int dirOutput = 0;
+   
+    // verificam nr de argumente date ca parametru
+
+    if(argc < 2){
         perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
         exit(EXIT);
+    }
+
+     // verificam daca se extinde functionalitatea codului cu intrarea "-o"
+
+    if(strcmp(argv[1], "-o")==0){
+        
+        // verificam ca numarul de argument dat ca parametru e corect
+
+        if(argc > 13 || argc < 4){
+            perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
+            exit(EXIT);
+        }
+        i++;
+        j+=2;
+        dirOutput = 1;
+
+    } // daca nu, rulam programul normal
+    else{
+        // verificam ca numarul de argument dat ca parametru e corect
+
+        if(argc > 11 || argc < 2){
+            perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
+            exit(EXIT);
+        }
+    
     }
 
     // verificam ca argumetele date ca parametru sunt directoare
 
     // TODO: mai trebue verificat ca parametri sunt diferiti
 
-    for(int i = 1; i < argc; i++){
+    for(; i < argc; i++){
         DIR *dir = opendir(argv[i]);
         if (dir) {
             closedir(dir);
@@ -476,11 +532,16 @@ int main(int argc, char** argv){
         }
     }
 
-    // apelam functia pentru a prelucra folderul in fiecare dat ca parametru
+    // apelam functia pentru a prelucra folderul pentru fiecare dat folder dat
 
-    for(int j = 1; j < argc; j++){
+    for(; j < argc; j++){
         printf("In folderul %s:\n", argv[j]);
-        analizareFolder(argv[j]);
+        if(dirOutput){
+            analizareFolder(argv[j],argv[2]);
+        }
+        else{
+            analizareFolder(argv[j],NULL);
+        }
         printf("-----------------\n");
     }
 
