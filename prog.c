@@ -4,7 +4,7 @@
 // ATENTIE: va fi compilat asa: gcc -Wall -o prog prog.c -lssl -lcrypto
 //----------------------------------------------------------------------
 
-// TODO: Cerinta Lab8
+// TODO: Cerinta Lab9
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <openssl/sha.h>
 #include <linux/limits.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define EXIT -1
 #define MAX_FILES 1000
@@ -24,7 +26,6 @@
 #define FILE_NAME_LENGTH 50
 
 // Structura de date pentru nume si cheksum a unui fisier
-
 typedef struct{
     char numeFisier[PATH_MAX];
     unsigned char hash[SHA256_DIG_LENGTH];
@@ -412,7 +413,7 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
 // TODO: Va trebui trata erorile pentru, nu poate sa se inchid programul doar pentru o eroare intru folder 
 // care a avut vreo eroare, ci va trebue sa sara la celelate foldere pentru analiza
 
-void analizareFolder(const char *nume, const char *output){
+int analizareFolder(const char *nume, const char *output){
 
      // vom apela functia pentru a deschide folderul dat ca parametru
 
@@ -472,11 +473,23 @@ void analizareFolder(const char *nume, const char *output){
             exit(EXIT);
         }
     }
+    return 1;
 }
 
 // se da ca parametru in linie de comanda folderele
 
+
+// pentru a crea procesul parinte si copil, intrebam pe github copilot
+// in the actual code, what can i modify to do a father proces that appels
+// a some son proces and the son proces ar the folders give at parameters, arg[2], argv[3], etc
+
+
 int main(int argc, char** argv){
+
+    // declaram variabilele pentru a stoca ID procesului (PID) si status al procesii fii
+
+    int pid;
+    int status;
 
     // verificam daca se da un argument suplimentar -o in care indicam si un folder de iesire
     // unde vor fi stocate toate snapshoturile din directoarele date ca parametru
@@ -532,17 +545,64 @@ int main(int argc, char** argv){
         }
     }
 
-    // apelam functia pentru a prelucra folderul pentru fiecare dat folder dat
+    // Cream un array pentru a pastra PIDs si exitCodes
 
-    for(; j < argc; j++){
-        printf("In folderul %s:\n", argv[j]);
-        if(dirOutput){
-            analizareFolder(argv[j],argv[2]);
+    pid_t pids[argc - j];
+    int exit_codes[argc - j];
+    int snapshot_codes[argc - j];
+
+    // cream un proces copil pentru fiecare folder dat ca parametru
+    
+    int count = 0;
+    int aux;
+
+    for(;j<argc;j++){
+    
+        pid = fork();
+
+        if(pid == -1){
+            fprintf(stderr,"EROARE: Creare proces copil pentru directorul %s.\n", argv[j]);
+            exit(EXIT);
         }
-        else{
-            analizareFolder(argv[j],NULL);
+     
+        if(pid == 0){ // blocul va fi executat de procesul copil
+            printf("In folderul %s:\n", argv[j]);
+            if(dirOutput){
+                aux = analizareFolder(argv[j],argv[2]);
+            }
+            else{
+                aux = analizareFolder(argv[j],NULL);
+            }
+
+            printf("-----------------\n");
+            exit(0);
         }
-        printf("-----------------\n");
+        else if(pid < 0){
+            fprintf(stderr,"Pentru folderul %s, procesul fiu nu se poate crea\n", argv[j]);
+            exit(1);
+        }else{
+            // punem pid-urile in array
+            pids[count] = pid;
+        }
+        count++;
+    }
+
+    // procesul parinte va astepta ca procesele fii sa termine 
+
+    for(int k = 0; k < count; k++){
+        waitpid(pids[k],&status,0);
+        // vom pune codul de iesire in tablou de exit codes
+        exit_codes[k] = WEXITSTATUS(status);
+    }
+
+    for (int l = 0; l < count; l++){
+        if(exit_codes[l] == 0){
+            printf("Snapshot for Directory %d created successfully.\n", l+1);
+        }
+    }
+
+    for(int i = 0; i < count; i++) {
+        printf("Child Process %d terminated with PID %d and exit code %d.\n", i+1, pids[i], exit_codes[i]);
     }
 
     return 0;
