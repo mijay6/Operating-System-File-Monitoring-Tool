@@ -4,7 +4,16 @@
 // ATENTIE: va fi compilat asa: gcc -Wall -o prog prog.c -lssl -lcrypto
 //----------------------------------------------------------------------
 
+// Metode de apelare a programului:
+
+//.prog folder1 folder2 folder3...etc (maxim 10 directoare)
+//.prog -o outputdir folder1 folder2 folder3...etc (maxim 10  directoare)
+//.prog -o outputdir -s izolated_space_dir folder1 folder2 folder3...etc (maxim 10  directoare)
+//----------------------------------------------------------------------
+
+
 // TODO: Cerinta Lab9
+// TODO: Cerinta Lab10
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +39,17 @@ typedef struct{
     char numeFisier[PATH_MAX];
     unsigned char hash[SHA256_DIG_LENGTH];
     int isDir;
+    mode_t mode;
+
 } SnapshotEntry;
+
+// printeaza stuctura SnapshotEntry
+void printSnapshotEntry(SnapshotEntry snapshot){
+    printf("Nume fisier: %s\n", snapshot.numeFisier);
+    printf("Hash: %s\n", snapshot.hash);
+    printf("IsDir: %d\n", snapshot.isDir);
+    printf("Mode: %d\n", snapshot.mode);
+}
 
 // functia pentru deschidere folder
 
@@ -179,6 +198,7 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
 
             snapshot[*count].isDir = 0;
             strcpy(snapshot[*count].numeFisier, cale);
+            snapshot[*count].mode = statbuf.st_mode;
 
             // calculamm suma de control SHA-256 a fisierului
 
@@ -190,15 +210,6 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
             }
         }
     }
-}
-
-// printeaza SnapshotEntry
-
-void printSnapshotEntry(SnapshotEntry snapshot){
-
-    printf("Nume fisier: %s\n", snapshot.numeFisier);
-    printf("Hash: %s\n", snapshot.hash);
-
 }
 
 // scriere snapshot in fisier
@@ -447,9 +458,6 @@ int analizareFolder(const char *nume, const char *output){
     char nume_fis[FILE_NAME_LENGTH];
     snprintf(nume_fis,sizeof(nume_fis),"%s_%s",nume,"snapshot.dat");
 
-    // intrebare
-    // trebuie modificata citirea ca sa admita si sa citeasca din fisierul output ???
-
     if (citesteSnapshot(nume,nume_fis, snapshot_anterior, &count_anterior)) {
         // Facem comparatia intre snapshotul anterior si cel actual
         comparaSnapshoturi(snapshot, count, snapshot_anterior, count_anterior);
@@ -473,6 +481,37 @@ int analizareFolder(const char *nume, const char *output){
             exit(EXIT);
         }
     }
+
+    // parcurgem snapshotul si vedem daca sunt fisiere daca au toate drepurile lipsa
+
+    for(int i = 0; i < count; i++){
+        if(snapshot[i].isDir == 0){
+            if(snapshot[i].mode == 0){
+                // vom crea un proces copil care va apela un scirpt bash care va muta fisierele malitioase
+                // in folderul dat ca parametru. 
+                // Scriptul este verify_for_malicious.sh
+
+                // se va apela exec in procesul copil de verify_for_malicious
+
+                int pid = fork();
+                
+                if(pid == -1){
+                    perror("EROARE: Creare proces copil pentru directorul scriptul bash.\n");
+                    exit(EXIT);
+                }
+                
+                if(pid == 0){ // blocul va fi executat de procesul copil
+                   // execlp("/lab")
+
+
+                }else{
+
+
+
+                }
+            }
+        }
+    }
     return 1;
 }
 
@@ -491,12 +530,16 @@ int main(int argc, char** argv){
     int pid;
     int status;
 
-    // verificam daca se da un argument suplimentar -o in care indicam si un folder de iesire
-    // unde vor fi stocate toate snapshoturile din directoarele date ca parametru
-
+    // declaram variabilele pentru a parcurge argumentele date ca parametru
+    
+    // pentru verificarea directoarelor
     int i = 1; 
+    // pentru crearea proceselor
     int j = 1;
+    // daca suntem in functionalitatea -o
     int dirOutput = 0;
+    // daca suntem in functionalitatea -s
+    int dirMove = 0;
    
     // verificam nr de argumente date ca parametru
 
@@ -505,29 +548,49 @@ int main(int argc, char** argv){
         exit(EXIT);
     }
 
-     // verificam daca se extinde functionalitatea codului cu intrarea "-o"
+    printf("jidoa\n");
 
-    if(strcmp(argv[1], "-o")==0){
-        
+    if(argc < 4 && strcmp(argv[1], "-o")==0){
+        perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
+        exit(EXIT);
+    }
+
+    // verificam daca se extinde functionalitatea codului cu intrarea "-o" si cu "-s"
+    // el va pune toate fisierele snapshot in folderul dat ca parametru 
+    // si va muta in-trun alt folder fisierele malitioase
+    if(strcmp(argv[1], "-o")==0 && strcmp(argv[3], "-s")==0){
         // verificam ca numarul de argument dat ca parametru e corect
 
-        if(argc > 13 || argc < 4){
+        if(argc > 14 || argc < 5){
             perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
             exit(EXIT);
         }
         i++;
         j+=2;
         dirOutput = 1;
-
-    } // daca nu, rulam programul normal
-    else{
-        // verificam ca numarul de argument dat ca parametru e corect
-
-        if(argc > 11 || argc < 2){
-            perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
-            exit(EXIT);
+        dirMove = 1;
         }
-    
+        else {
+            if(strcmp(argv[1], "-o")==0){
+         
+            // verificam ca numarul de argument dat ca parametru e corect
+
+            if(argc > 13 || argc < 4){
+                perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
+                exit(EXIT);
+            }
+            i++;
+            j+=2;
+            dirOutput = 1;
+        }  
+        else // daca nu, rulam programul normal
+        {
+            // verificam ca numarul de argument dat ca parametru e corect
+            if(argc > 11 || argc < 2){
+                perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
+                exit(EXIT);
+            }
+        }
     }
 
     // verificam ca argumetele date ca parametru sunt directoare
@@ -535,6 +598,9 @@ int main(int argc, char** argv){
     // TODO: mai trebue verificat ca parametri sunt diferiti
 
     for(; i < argc; i++){
+        if(dirMove && i==3){
+            continue;
+        }
         DIR *dir = opendir(argv[i]);
         if (dir) {
             closedir(dir);
@@ -557,7 +623,14 @@ int main(int argc, char** argv){
     int aux;
 
     for(;j<argc;j++){
-    
+        
+        // daca detectam -s, trecem cu j doua pozitii in fata
+        if(strcmp(argv[j], "-s")==0){
+            // inca o pozitie ca sa trecem de izolated_space_dir
+            j++;
+            continue;
+        }
+
         pid = fork();
 
         if(pid == -1){
@@ -577,10 +650,7 @@ int main(int argc, char** argv){
             printf("-----------------\n");
             exit(0);
         }
-        else if(pid < 0){
-            fprintf(stderr,"Pentru folderul %s, procesul fiu nu se poate crea\n", argv[j]);
-            exit(1);
-        }else{
+        else{
             // punem pid-urile in array
             pids[count] = pid;
         }
