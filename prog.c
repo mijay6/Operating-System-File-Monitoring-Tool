@@ -27,6 +27,7 @@
 #include <linux/limits.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <libgen.h>
 
 #define EXIT -1
 #define MAX_FILES 1000
@@ -200,14 +201,21 @@ void parcurgereFolder(DIR *folder, char const *nume, SnapshotEntry *snapshot, in
             strcpy(snapshot[*count].numeFisier, cale);
             snapshot[*count].mode = statbuf.st_mode;
 
-            // calculamm suma de control SHA-256 a fisierului
+            // printSnapshotEntry(snapshot[*count]);
 
-            if(calculeazaSHA256(cale,snapshot[*count].hash)){
-                (*count)++;
-            }else{
-                fprintf(stderr,"Eroare la calularea sumei de control ai fisierului %s.\n", cale);
-                continue;
+            // verificam daca are persmisiuni de scriere si citire
+
+             if ((snapshot[*count].mode & S_IRUSR) && (snapshot[*count].mode & S_IWUSR)){
+
+                // calculamm suma de control SHA-256 a fisierului care are drepturi de citire si scriere
+            
+                if(calculeazaSHA256(cale,snapshot[*count].hash) == 0){
+                    fprintf(stderr,"Eroare la calularea sumei de control ai fisierului %s.\n", cale);
+                    continue;
+                }
+
             }
+            (*count)++;
         }
     }
 }
@@ -364,7 +372,7 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
                 }  
             }
         }
-        if (!gasit && (snapshot1[i].isDir == 0)) {
+        if (!gasit && (snapshot1[i].isDir == 0) && ((snapshot1[i].mode & S_IRWXU) || (snapshot1[i].mode & S_IRWXG) || (snapshot1[i].mode & S_IRWXO))) {
             modificareFolder=1;
             printf("Fisierul %s a fost adăugat.\n", snapshot1[i].numeFisier);
         }
@@ -424,7 +432,7 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
 // TODO: Va trebui trata erorile pentru, nu poate sa se inchid programul doar pentru o eroare intru folder 
 // care a avut vreo eroare, ci va trebue sa sara la celelate foldere pentru analiza
 
-int analizareFolder(const char *nume, const char *output){
+int analizareFolder(const char *nume, const char *output, const char *izolated_space_dir){
 
      // vom apela functia pentru a deschide folderul dat ca parametru
 
@@ -474,7 +482,7 @@ int analizareFolder(const char *nume, const char *output){
             inchideFolder(folder);
             exit(EXIT);
         }
-    }else{
+    }else {
         if (!scrieSnapshot(output,nume_fis, snapshot, count)){
             perror("EROARE: Creare fisier snapshot.\n");
             inchideFolder(folder);
@@ -482,32 +490,56 @@ int analizareFolder(const char *nume, const char *output){
         }
     }
 
-    // parcurgem snapshotul si vedem daca sunt fisiere daca au toate drepurile lipsa
+    if(izolated_space_dir != NULL){
 
-    for(int i = 0; i < count; i++){
-        if(snapshot[i].isDir == 0){
-            if(snapshot[i].mode == 0){
-                // vom crea un proces copil care va apela un scirpt bash care va muta fisierele malitioase
-                // in folderul dat ca parametru. 
-                // Scriptul este verify_for_malicious.sh
+        // parcurgem snapshotul si vedem daca sunt fisiere daca au toate drepurile lipsa
 
-                // se va apela exec in procesul copil de verify_for_malicious
+        for(int i = 0; i < count; i++){
+            if(snapshot[i].isDir == 0){
+                if((snapshot[i].mode & S_IRWXU) == 0 &&
+                    (snapshot[i].mode & S_IRWXG) == 0 &&
+                    (snapshot[i].mode & S_IRWXO) == 0){
+                    // vom crea un proces copil care va apela un scirpt bash care va muta fisierele malitioase
+                    // in folderul dat ca parametru. 
+                    // Scriptul este verify_for_malicious.sh
 
-                int pid = fork();
-                
-                if(pid == -1){
-                    perror("EROARE: Creare proces copil pentru directorul scriptul bash.\n");
-                    exit(EXIT);
-                }
-                
-                if(pid == 0){ // blocul va fi executat de procesul copil
-                   // execlp("/lab")
+                    // se va apela exec in procesul copil de verify_for_malicious
 
+                    int pid = fork();
+                    
+                    if(pid == -1){
+                        perror("EROARE: Creare proces copil pentru directorul scriptul bash.\n");
+                        exit(EXIT);
+                    }
+                    
+                    if(pid == 0){ // blocul va fi executat de procesul copil
+                        execl("/home/mihai/Desktop/SO/lab6/verify_for_malicious.sh", "/home/mihai/Desktop/SO/lab6/verify_for_malicious.sh", snapshot[i].numeFisier, NULL);
+                        // daca e eroare la apelare functiei execlp
+                        perror("EROARE: la apelul scriptului verify_for_malicious.sh.\n");
+                        exit(EXIT);
+                    }else{// codul de mai zos va fi executat de procesul parinte
+                        int status;
+                        // va astepta ca procesul fiu sa termine
+                        waitpid(pid,&status,0);
+                        // verificam starea de iesire a procesului copil
+                        if(WEXITSTATUS(status) == 1){
+                            // acum trebue sa mutam fisierul malitios in folderul dat
+                            // printf("Fisierul %s este malitios.\n", snapshot[i].numeFisier);
+                    
+                            //extragem doar numele a fisierului
+                            char* numeFisier = basename(snapshot[i].numeFisier);
 
-                }else{
+                            // cream noua cale relativa a fisierului malitios
+                            char cale[PATH_MAX];
+                            snprintf(cale,sizeof(cale),"%s/%s",izolated_space_dir,numeFisier);
 
-
-
+                            if(rename(snapshot[i].numeFisier,cale) != 0){
+                                perror("EROARE: La mutarea fisierului malitios.\n");
+                                exit(EXIT);
+                            }
+                            
+                        }
+                    }
                 }
             }
         }
@@ -517,11 +549,9 @@ int analizareFolder(const char *nume, const char *output){
 
 // se da ca parametru in linie de comanda folderele
 
-
 // pentru a crea procesul parinte si copil, intrebam pe github copilot
 // in the actual code, what can i modify to do a father proces that appels
 // a some son proces and the son proces ar the folders give at parameters, arg[2], argv[3], etc
-
 
 int main(int argc, char** argv){
 
@@ -547,8 +577,6 @@ int main(int argc, char** argv){
         perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
         exit(EXIT);
     }
-
-    printf("jidoa\n");
 
     if(argc < 4 && strcmp(argv[1], "-o")==0){
         perror("Eroare: Numar de argumente de linie de comanda gresit.\n");
@@ -640,17 +668,19 @@ int main(int argc, char** argv){
      
         if(pid == 0){ // blocul va fi executat de procesul copil
             printf("In folderul %s:\n", argv[j]);
-            if(dirOutput){
-                aux = analizareFolder(argv[j],argv[2]);
+            if(dirOutput && dirMove){
+                aux = analizareFolder(argv[j],argv[2],argv[4]);
+            }
+            else if(dirOutput){
+                aux = analizareFolder(argv[j],argv[2],NULL);
             }
             else{
-                aux = analizareFolder(argv[j],NULL);
+                aux = analizareFolder(argv[j],NULL,NULL);
             }
-
             printf("-----------------\n");
             exit(0);
         }
-        else{
+        else{ // Codul de mai jos va fi executat de procesul parinte
             // punem pid-urile in array
             pids[count] = pid;
         }
