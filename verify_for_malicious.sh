@@ -3,7 +3,7 @@
 #verificam nr de argumente dat ca parametru
 if test $# -ne 1
 then
-    echo "Eroare: numar de argumente la verificarea fisier maliios invalid\n"
+    echo "Eroare: numar de argumente la verificarea fisier maliios invalid.\n"
     exit 1
 fi
 
@@ -13,8 +13,15 @@ fis="$1"
 #dam drepturi de citire la fisier.
 chmod +r "$1"
 
-#variabila de iesire
-resutl=0
+#variabile de rezultat
+suspect=0
+periculos=0
+
+#definim nr max de lini, cuvinte si caractere
+
+max_linii=100
+max_cuvinte=5000
+max_caractere=10000
 
 #definim cuvinte cheie malitioase
 
@@ -24,38 +31,6 @@ string3="risk"
 string4="attack"
 string5="malware"
 string6="malicious"
-
-#daca gasim cuvintele cheie in fisierul dat ca parametru, atunci fisierul este considerat malitios
-
-
-# grep va cauta una din aceste cuvinte si cand va gasi una, va termina de cautat
-
-grep -m 1 -e "$string1" -e "$string2" -e "$string3" -e "$string4" -e "$string5" -e "$string6" "$fis"
-
-# daca o gasit setam variabila result pe 1
-
-if [ $? -eq 0 ]; then
-    result=1;
-    chmod -r "$fis"
-    exit $result
-fi
-
-#if grep -q "$string1" "$fis"; then
-#    result=1
-#fi
-
-#if grep -q "$string2" "$fis"; then
-#    result=1
-#fi
-
-
-# verificam daca exista caractere non-ASCII in fisier
-if grep -q "[0x80-0xFF]" "$fis"
-then
-    result=1
-    chmod -r "$fis"
-    exit $result
-fi
 
 # aflam numarul de lini, cuvinte si caractere din fisier
 
@@ -84,39 +59,67 @@ done
 
 # verificam numarul de lini, cuvinte si caractere din fisier
 
-if test "$linii" -le 1 -o "$linii" -ge 5
-then 
-    result=1
-fi
-
-if test "$cuvinte" -le 1 -o "$cuvinte" -ge 10
-then 
-    result=1
-fi
-
-if test "$caractere" -le 1 -o "$caractere" -ge 20
-then 
-    result=1
-fi
-
-
-if test "$linii" -lt 3
-then 
-    result=1
-fi
-
-if test "$cuvinte" -gt 1000
-then 
-    result=1
-fi
-
-if test "$caractere" -gt 2000
+if ["$linii" -ge "$max_linii" -o "$cuvinte" -ge "max_cuvinte" -o "$caractere" -ge "max_caractere"]
 then
-    result=1
+    periculos=1
+    chmod -r "$fis"
+    echo "$fis"
+    exit $periculos
+fi
+
+
+# daca fisierul are mai putin de 3 linii si mai mult de 1000 de cuvinte sau 2000 de caractere,
+# atunci fisierul este considerat suspect
+
+if [ "$linii" -lt 3 -a "$cuvinte" -gt 1000 -a "$caractere" -gt 2000 ]
+then
+    suspect=1
+fi
+
+# daca fisierul e considerat suspect si daca gasim cuvintele cheie in fisierul dat ca parametru,
+# atunci fisierul este considerat periculos
+
+
+if [ "$suspect" -eq 1 ]
+then
+
+    # grep va cauta una din aceste cuvinte si cand va gasi una, va termina de cautat
+
+    grep -m 1 -e "$string1" -e "$string2" -e "$string3" -e "$string4" -e "$string5" -e "$string6" "$fis"
+    
+    # daca o gasit setam variabila periculos pe 1
+    
+    if [ $? -eq 0 ]; then
+        periculos=1;
+        chmod -r "$fis"
+        echo "$fis"
+        exit $periculos
+    fi
+fi
+
+# daca fisierul este suspect, atunci verificam daca exista caractere non-ASCII in fisier
+
+if [ "$suspect" -eq 1 ]
+then
+
+    # daca o gasit setam variabila periculos pe 1
+
+    if grep -q "[0x80-0xFF]" "$fis"
+    then
+        periculos=1
+        chmod -r "$fis"
+        echo "$fis"
+        exit $result
+    fi
+fi
+
+if [ "$suspect" -eq 0 ]
+then
+    echo "SAFE"
 fi
 
 # scoatem drepturile de citire a fisierului
-chmod -r "$fis"
+chmod -r "$fis"   # NU INTELEG dece nu merge
 
 #iesim cu un cod de iesire specificat de result
 exit $result

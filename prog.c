@@ -12,7 +12,6 @@
 //----------------------------------------------------------------------
 
 
-// TODO: Cerinta Lab9
 // TODO: Cerinta Lab10
 
 #include <stdio.h>
@@ -364,10 +363,7 @@ void comparaSnapshoturi(SnapshotEntry *snapshot1, int count1, SnapshotEntry *sna
                     if (snapshot1[i].isDir != snapshot2[j].isDir) {
                         modificareFolder=1;
                         printf("FIsierul %s a fost modificat: tipul de fisier s-a schimbat.\n", snapshot1[i].numeFisier);
-                    } /*else if (snapshot1[i].isDir == 0 && memcmp(snapshot1[i].hash, snapshot2[j].hash, SHA256_DIGEST_LENGTH) != 0) {
-                        modificareFolder = 1;
-                        printf("Elementul %s a fost modificat: hash-ul s-a schimbat.\n", snapshot1[i].numeFisier);
-                    }*/
+                    }
                     break;
                 }  
             }
@@ -492,53 +488,78 @@ int analizareFolder(const char *nume, const char *output, const char *izolated_s
 
     if(izolated_space_dir != NULL){
 
-        // parcurgem snapshotul si vedem daca sunt fisiere daca au toate drepurile lipsa
+        // parcurgem snapshotul si vedem daca sunt fisiere care au toate drepurile lipsa
 
         for(int i = 0; i < count; i++){
             if(snapshot[i].isDir == 0){
                 if((snapshot[i].mode & S_IRWXU) == 0 &&
                     (snapshot[i].mode & S_IRWXG) == 0 &&
                     (snapshot[i].mode & S_IRWXO) == 0){
-                    // vom crea un proces copil care va apela un scirpt bash care va muta fisierele malitioase
-                    // in folderul dat ca parametru. 
-                    // Scriptul este verify_for_malicious.sh
 
-                    // se va apela exec in procesul copil de verify_for_malicious
+                    // vom crea un proces copil care va apela un script shell care verifica daca fisierul este malitios
+
+                    // Pentru acea vom crea un pipe pentru a comunica intre procesul parinte si fiu
+
+                    int pipefd[2];
+
+                    if(pipe(pipefd) < 0){
+                        perror("EROARE: Creare pipe pentru comunicarea intre porcesul parinte si fiu.\n");
+                        exit(EXIT);
+                    }
 
                     int pid = fork();
                     
-                    if(pid == -1){
+                    if(pid < 0){
                         perror("EROARE: Creare proces copil pentru directorul scriptul bash.\n");
                         exit(EXIT);
                     }
                     
-                    if(pid == 0){ // blocul va fi executat de procesul copil
+                    // se va apela exec cu scriptorul verify_for_malicious.sh in procesul fiu
+
+                    if(pid == 0){// procesul fiu
+                        
+                        close(pipefd[0]);   // inchidem capatul de citire al pipe-ului
+
+                        // reduirectam iesirea standard a erorilor si al outputului in pipe
+                        dup2(pipefd[1],1);
+                        dup2(pipefd[1],2);
+
+                        close(pipefd[1]);   // inchidem capatul de scriere al pipe-ului
+
                         execl("/home/mihai/Desktop/SO/lab6/verify_for_malicious.sh", "/home/mihai/Desktop/SO/lab6/verify_for_malicious.sh", snapshot[i].numeFisier, NULL);
                         // daca e eroare la apelare functiei execlp
                         perror("EROARE: la apelul scriptului verify_for_malicious.sh.\n");
                         exit(EXIT);
-                    }else{// codul de mai zos va fi executat de procesul parinte
-                        int status;
-                        // va astepta ca procesul fiu sa termine
-                        waitpid(pid,&status,0);
-                        // verificam starea de iesire a procesului copil
-                        if(WEXITSTATUS(status) == 1){
-                            // acum trebue sa mutam fisierul malitios in folderul dat
-                            // printf("Fisierul %s este malitios.\n", snapshot[i].numeFisier);
-                    
-                            //extragem doar numele a fisierului
-                            char* numeFisier = basename(snapshot[i].numeFisier);
+                    }else{// procesul parinte
+                        
+                        close(pipefd[1]);  // inchidem capatul de scriere al pipe-ului
 
-                            // cream noua cale relativa a fisierului malitios
-                            char cale[PATH_MAX];
-                            snprintf(cale,sizeof(cale),"%s/%s",izolated_space_dir,numeFisier);
+                        char buffer[FILE_NAME_LENGTH];
 
-                            if(rename(snapshot[i].numeFisier,cale) != 0){
-                                perror("EROARE: La mutarea fisierului malitios.\n");
-                                exit(EXIT);
+                        // citim din pipe
+                        while (read(pipefd[0], buffer, sizeof(buffer)) != 0) {
+                            // daca ce am citit este diferit de SAFE, atunci fisierul este malitios
+                            if(strcmp(buffer,"SAFE") != 0){
+                                printf("Fisierul %s este malitios.\n", snapshot[i].numeFisier);
+                                
+                                //extragem doar numele a fisierului
+                                char* numeFisier = basename(snapshot[i].numeFisier);
+
+                                printf("%s\n", numeFisier);
+
+                                // cream noua cale relativa a fisierului malitios
+                                char cale[PATH_MAX];
+                                snprintf(cale,sizeof(cale),"%s/%s",izolated_space_dir,numeFisier);
+
+                                if(rename(snapshot[i].numeFisier,cale) != 0){
+                                    perror("EROARE: La mutarea fisierului malitios.\n");
+                                    exit(EXIT);
+                                }   
+                                
                             }
-                            
+                            break;
                         }
+                        close(pipefd[0]);  // inchidem capatul de citire al pipe-ului
                     }
                 }
             }
@@ -651,7 +672,7 @@ int main(int argc, char** argv){
     int aux;
 
     for(;j<argc;j++){
-        
+
         // daca detectam -s, trecem cu j doua pozitii in fata
         if(strcmp(argv[j], "-s")==0){
             // inca o pozitie ca sa trecem de izolated_space_dir
