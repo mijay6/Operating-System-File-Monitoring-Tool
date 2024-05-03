@@ -12,8 +12,6 @@
 //----------------------------------------------------------------------
 
 
-// TODO: Cerinta Lab10
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -490,6 +488,8 @@ int analizareFolder(const char *nume, const char *output, const char *izolated_s
 
         // parcurgem snapshotul si vedem daca sunt fisiere care au toate drepurile lipsa
 
+        int nrFisiereCorupte = 0;    
+
         for(int i = 0; i < count; i++){
             if(snapshot[i].isDir == 0){
                 if((snapshot[i].mode & S_IRWXU) == 0 &&
@@ -541,7 +541,8 @@ int analizareFolder(const char *nume, const char *output, const char *izolated_s
                             // daca ce am citit este diferit de SAFE, atunci fisierul este malitios
                             if(strcmp(buffer,"SAFE") != 0){
                                 printf("Fisierul %s este malitios.\n", snapshot[i].numeFisier);
-                                
+                                nrFisiereCorupte++;
+
                                 //extragem doar numele a fisierului
                                 char* numeFisier = basename(snapshot[i].numeFisier);
 
@@ -564,6 +565,7 @@ int analizareFolder(const char *nume, const char *output, const char *izolated_s
                 }
             }
         }
+        return nrFisiereCorupte;
     }
     return 1;
 }
@@ -664,12 +666,12 @@ int main(int argc, char** argv){
 
     pid_t pids[argc - j];
     int exit_codes[argc - j];
-    int snapshot_codes[argc - j];
+   // int snapshot_codes[argc - j];
+    int malitios_codes[argc - j];
 
     // cream un proces copil pentru fiecare folder dat ca parametru
     
     int count = 0;
-    int aux;
 
     for(;j<argc;j++){
 
@@ -680,6 +682,15 @@ int main(int argc, char** argv){
             continue;
         }
 
+        int nrFisiereCorupte = 0;    
+        int pipefd[2]; // declaram pipe
+
+        // cream un pipe pentru a ne comunica cu procesul fiu
+        if(pipe(pipefd) < 0){
+            perror("EROARE: Creare pipe pentru comunicarea intre porcesul parinte si fiu.\n");
+            exit(EXIT);
+        }
+
         pid = fork();
 
         if(pid == -1){
@@ -688,22 +699,49 @@ int main(int argc, char** argv){
         }
      
         if(pid == 0){ // blocul va fi executat de procesul copil
+
+            close(pipefd[0]); // inchidem capatul de citire al pipe-ului
+            int flag = 0; // pentru a determina daca verificam daca fisierul este malitios
+
             printf("In folderul %s:\n", argv[j]);
             if(dirOutput && dirMove){
-                aux = analizareFolder(argv[j],argv[2],argv[4]);
+                nrFisiereCorupte = analizareFolder(argv[j],argv[2],argv[4]);
+                // scriem numarul de fisiere malitioase in pipe
+                printf("%d\n", nrFisiereCorupte);
+                flag = 1;
+                write(pipefd[1], &flag, sizeof(flag));
+                write(pipefd[1], &nrFisiereCorupte, sizeof(nrFisiereCorupte));
+                
             }
             else if(dirOutput){
-                aux = analizareFolder(argv[j],argv[2],NULL);
+                analizareFolder(argv[j],argv[2],NULL);
             }
             else{
-                aux = analizareFolder(argv[j],NULL,NULL);
+                analizareFolder(argv[j],NULL,NULL);
             }
             printf("-----------------\n");
+
+            close(pipefd[1]); // inchidem capatul de scriere al pipe-ului    
+
             exit(0);
         }
         else{ // Codul de mai jos va fi executat de procesul parinte
+            
+            close(pipefd[1]); // inchidem capatul de scriere al pipe-ului
+
             // punem pid-urile in array
             pids[count] = pid;
+
+            // citim din pipe nr de fisiere malitioase
+            int flag;
+            read(pipefd[0], &flag, sizeof(flag));
+
+             // punem numarul de fisiere cu potential pericol            
+            if(flag == 1){
+                read(pipefd[0], &malitios_codes[count], sizeof(malitios_codes[count]));
+            }
+
+            close(pipefd[0]); // inchidem capatul de citire al pipe-ului  
         }
         count++;
     }
@@ -723,7 +761,11 @@ int main(int argc, char** argv){
     }
 
     for(int i = 0; i < count; i++) {
-        printf("Child Process %d terminated with PID %d and exit code %d.\n", i+1, pids[i], exit_codes[i]);
+        if(dirMove){
+            printf("Child Process %d terminated with PID %d and whith %d potentially dangerous files.\n", i+1, pids[i], malitios_codes[i]);
+        }else{
+            printf("Child Process %d terminated with PID %d and exit code %d.\n", i+1, pids[i], exit_codes[i]);
+        }
     }
 
     return 0;
