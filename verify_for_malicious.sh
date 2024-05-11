@@ -11,7 +11,7 @@ fi
 fis="$1"
 
 #dam drepturi de citire la fisier.
-chmod +r "$1"
+chmod 400 "$1"
 
 #variabile de rezultat
 suspect=0
@@ -59,14 +59,13 @@ done
 
 # verificam numarul de lini, cuvinte si caractere din fisier
 
-if ["$linii" -ge "$max_linii" -o "$cuvinte" -ge "max_cuvinte" -o "$caractere" -ge "max_caractere"]
+if [ "$linii" -ge "$max_linii" -o "$cuvinte" -ge "$max_cuvinte" -o "$caractere" -ge "$max_caractere" ]
 then
     periculos=1
-    chmod -r "$fis"
+    chmod 000 "$fis"
     echo "$fis"
     exit $periculos
 fi
-
 
 # daca fisierul are mai putin de 3 linii si mai mult de 1000 de cuvinte sau 2000 de caractere,
 # atunci fisierul este considerat suspect
@@ -78,48 +77,40 @@ fi
 
 # daca fisierul e considerat suspect si daca gasim cuvintele cheie in fisierul dat ca parametru,
 # atunci fisierul este considerat periculos
-
-
 if [ "$suspect" -eq 1 ]
 then
-
     # grep va cauta una din aceste cuvinte si cand va gasi una, va termina de cautat
 
-    grep -m 1 -e "$string1" -e "$string2" -e "$string3" -e "$string4" -e "$string5" -e "$string6" "$fis"
-    
+    grep -q -m 1 -e "$string1" -e "$string2" -e "$string3" -e "$string4" -e "$string5" -e "$string6" "$fis"
+
     # daca o gasit setam variabila periculos pe 1
     
     if [ $? -eq 0 ]; then
         periculos=1;
-        chmod -r "$fis"
+        chmod 000 "$fis"
         echo "$fis"
         exit $periculos
     fi
 fi
 
 # daca fisierul este suspect, atunci verificam daca exista caractere non-ASCII in fisier
-
 if [ "$suspect" -eq 1 ]
 then
-
     # daca o gasit setam variabila periculos pe 1
-
-    if grep -q "[0x80-0xFF]" "$fis"
+    if grep --perl-regexp -q "[^\x00-\x7F]" "$fis"
     then
         periculos=1
-        chmod -r "$fis"
+        chmod 000 "$fis"
         echo "$fis"
-        exit $result
+        exit $periculos
     fi
 fi
 
-if [ "$suspect" -eq 0 ]
-then
-    echo "SAFE"
-fi
+# daca nu am gasit sa fie periculos, printam SAFE
+echo "SAFE"
 
 # scoatem drepturile de citire a fisierului
-chmod -r "$fis"   # NU INTELEG dece nu merge
+chmod 000 "$fis"  
 
 #iesim cu un cod de iesire specificat de result
-exit $result
+exit $periculos
