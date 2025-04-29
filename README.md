@@ -1,11 +1,10 @@
 # Folder Integrity and Malicious File Scanner
 
-
 [![Assembly](https://img.shields.io/badge/language-C-green.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![University: UPT](https://img.shields.io/badge/University-Politehnica%20Timisoara-red.svg)](https://www.upt.ro/)
 [![Status: Academic](https://img.shields.io/badge/Status-Academic%20Project-success.svg)](https://github.com/mijay6/Operating-System-File-Monitoring-Tool)
-
+[![Version](https://img.shields.io/badge/Version-1.0.0-brightgreen.svg) ](https://github.com/mijay6/Operating-System-File-Monitoring-Tool/releases) 
 
 ## Description
 This utility scans one or more directories (and their subdirectories), computes and stores SHA-256 checksums and metadata for every file, then compares snapshots across runs to detect:
@@ -84,6 +83,8 @@ This repository includes three sample test folders:
 Each contains various files and nested directories (including deliberately malicious files) to validate snapshot integrity and malicious detection. 
 
 ## Author
+Dobra Mihai
+
 Politehnica University of Timișoara  
 Faculty of Automation and Computer Science  
 Operating systems

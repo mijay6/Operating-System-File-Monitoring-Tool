@@ -1,30 +1,28 @@
 #!/bin/bash
 
-#verificam nr de argumente dat ca parametru
+# Check the number of arguments provided as a parameter
 if test $# -ne 1
 then
-    echo "Eroare: numar de argumente la verificarea fisier maliios invalid.\n"
+    echo "Error: Invalid number of arguments for malicious file verification.\n"
     exit 1
 fi
 
-# asignam argumentul dat cu o variabila
+# Assign the provided argument to a variable
 fis="$1"
 
-#dam drepturi de citire la fisier.
+# Grant read permissions to the file
 chmod 400 "$1"
 
-#variabile de rezultat
+# Result variables
 suspect=0
 periculos=0
 
-#definim nr max de lini, cuvinte si caractere
-
+# Define the maximum number of lines, words, and characters
 max_linii=100
 max_cuvinte=5000
 max_caractere=10000
 
-#definim cuvinte cheie malitioase
-
+# Define malicious keywords
 string1="corrupted"
 string2="dangerous"
 string3="risk"
@@ -32,8 +30,7 @@ string4="attack"
 string5="malware"
 string6="malicious"
 
-# aflam numarul de lini, cuvinte si caractere din fisier
-
+# Find the number of lines, words, and characters in the file
 i=0
 linii=0
 cuvinte=0
@@ -41,7 +38,6 @@ caractere=0
 
 for entity in $(wc "$fis")
 do
-
     if test "$i" -eq 0
     then 
         linii=$entity
@@ -57,8 +53,7 @@ do
     fi
 done
 
-# verificam numarul de lini, cuvinte si caractere din fisier
-
+# Check the number of lines, words, and characters in the file
 if [ "$linii" -ge "$max_linii" -o "$cuvinte" -ge "$max_cuvinte" -o "$caractere" -ge "$max_caractere" ]
 then
     periculos=1
@@ -67,24 +62,21 @@ then
     exit $periculos
 fi
 
-# daca fisierul are mai putin de 3 linii si mai mult de 1000 de cuvinte sau 2000 de caractere,
-# atunci fisierul este considerat suspect
-
+# If the file has fewer than 3 lines and more than 1000 words or 2000 characters,
+# then the file is considered suspicious
 if [ "$linii" -lt 3 -a "$cuvinte" -gt 1000 -a "$caractere" -gt 2000 ]
 then
     suspect=1
 fi
 
-# daca fisierul e considerat suspect si daca gasim cuvintele cheie in fisierul dat ca parametru,
-# atunci fisierul este considerat periculos
+# If the file is considered suspicious and if we find the keywords in the file provided as a parameter,
+# then the file is considered dangerous
 if [ "$suspect" -eq 1 ]
 then
-    # grep va cauta una din aceste cuvinte si cand va gasi una, va termina de cautat
-
+    # grep will search for one of these keywords and will stop searching when it finds one
     grep -q -m 1 -e "$string1" -e "$string2" -e "$string3" -e "$string4" -e "$string5" -e "$string6" "$fis"
 
-    # daca o gasit setam variabila periculos pe 1
-    
+    # If it finds one, set the variable "periculos" to 1
     if [ $? -eq 0 ]; then
         periculos=1;
         chmod 000 "$fis"
@@ -93,10 +85,10 @@ then
     fi
 fi
 
-# daca fisierul este suspect, atunci verificam daca exista caractere non-ASCII in fisier
+# If the file is suspicious, then check if there are non-ASCII characters in the file
 if [ "$suspect" -eq 1 ]
 then
-    # daca o gasit setam variabila periculos pe 1
+    # If it finds any, set the variable "periculos" to 1
     if grep --perl-regexp -q "[^\x00-\x7F]" "$fis"
     then
         periculos=1
@@ -106,11 +98,11 @@ then
     fi
 fi
 
-# daca nu am gasit sa fie periculos, printam SAFE
+# If the file is not found to be dangerous, print SAFE
 echo "SAFE"
 
-# scoatem drepturile de citire a fisierului
+# Remove read permissions from the file
 chmod 000 "$fis"  
 
-#iesim cu un cod de iesire specificat de result
+# Exit with a specific exit code based on the result
 exit $periculos
